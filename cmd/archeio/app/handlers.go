@@ -41,10 +41,20 @@ func MakeHandler(upstreamRegistry string) http.Handler {
 	blobs := newCachedBlobChecker()
 	doV2 := makeV2Handler(upstreamRegistry, blobs)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// only allow GET, HEAD
+		// this is all a client needs to pull images
+		// we do *not* support mutation
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "Only GET and HEAD are allowed.", http.StatusMethodNotAllowed)
+			return
+		}
 		// all valid registry requests should be at /v2/
 		// v1 API is super old and not supported by GCR anymore.
 		path := r.URL.Path
 		switch {
+		case path == "/v2/":
+			w.WriteHeader(http.StatusOK)
+			return
 		case strings.HasPrefix(path, "/v2/"):
 			doV2(w, r)
 		case path == "/":
@@ -65,12 +75,19 @@ func makeV2Handler(upstreamRegistry string, blobs blobChecker) func(w http.Respo
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
+		//if path == "/v2/" || path == "/v2"
+
 		// check if blob request
 		matches := reBlob.FindStringSubmatch(path)
 		if len(matches) != 2 {
 			// not a blob request so forward it to the main upstream registry
-			klog.V(2).InfoS("redirecting non-blob request to upstream registry", "path", path)
-			http.Redirect(w, r, upstreamRegistry+path, http.StatusPermanentRedirect)
+			redirectPath := path
+			// if path is not just /v2/, which is a special endpoint
+			if len(path) > 5 {
+				redirectPath = "/v2/" + "k8s-artifacts-prod" + strings.TrimPrefix(path, "/v2")
+			}
+			klog.V(2).InfoS("redirecting non-blob request to upstream registry", "path", path, "redirect", upstreamRegistry+redirectPath)
+			http.Redirect(w, r, upstreamRegistry+redirectPath, http.StatusPermanentRedirect)
 			return
 		}
 
@@ -87,8 +104,13 @@ func makeV2Handler(upstreamRegistry string, blobs blobChecker) func(w http.Respo
 		awsRegion, ipIsKnown := regionMapper.GetIP(clientIP)
 		if !ipIsKnown {
 			// no region match, redirect to main upstream registry
-			klog.V(2).InfoS("redirecting blob request to upstream registry", "path", path)
-			http.Redirect(w, r, upstreamRegistry+path, http.StatusPermanentRedirect)
+			redirectPath := path
+			// if path is not just /v2/, which is a special endpoint
+			if len(path) > 5 {
+				redirectPath = "/v2/" + "k8s-artifacts-prod" + strings.TrimPrefix(path, "/v2")
+			}
+			klog.V(2).InfoS("redirecting blob request to upstream registry", "path", path, "redirect", upstreamRegistry+redirectPath)
+			http.Redirect(w, r, upstreamRegistry+redirectPath, http.StatusPermanentRedirect)
 			return
 		}
 
@@ -105,7 +127,13 @@ func makeV2Handler(upstreamRegistry string, blobs blobChecker) func(w http.Respo
 		}
 
 		// fall back to redirect to upstream
-		klog.V(2).InfoS("redirecting blob request to upstream registry", "path", path)
-		http.Redirect(w, r, upstreamRegistry+path, http.StatusPermanentRedirect)
+		redirectPath := path
+		// if path is not just /v2/, which is a special endpoint
+		if len(path) > 5 {
+			redirectPath = "/v2/" + "k8s-artifacts-prod" + strings.TrimPrefix(path, "/v2")
+		}
+		klog.V(2).InfoS("redirecting blob request to upstream registry", "path", path, "redirect", upstreamRegistry+redirectPath)
+		http.Redirect(w, r, upstreamRegistry+redirectPath, http.StatusPermanentRedirect)
+
 	}
 }

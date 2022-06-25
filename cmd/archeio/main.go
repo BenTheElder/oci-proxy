@@ -29,7 +29,8 @@ import (
 	"sigs.k8s.io/oci-proxy/cmd/archeio/app"
 )
 
-const defaultUpstreamRegistry = "https://k8s.gcr.io"
+const defaultUpstreamRegistryEndpoint = "https://us.gcr.io"
+const defaultUpstreamRegistryBase = "k8s-artifacts-prod"
 
 func main() {
 	// klog setup
@@ -42,7 +43,7 @@ func main() {
 	port := getEnv("PORT", "8080")
 
 	// make it possible to override k8s.gcr.io without rebuilding in the future
-	upstreamRegistry := getEnv("UPSTREAM_REGISTRY", defaultUpstreamRegistry)
+	upstreamRegistry := getEnv("UPSTREAM_REGISTRY", defaultUpstreamRegistryEndpoint)
 
 	// configure server with reasonable timeout
 	// we only serve redirects, 10s should be sufficient
