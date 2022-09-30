@@ -26,7 +26,10 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/automaxprocs/maxprocs"
+
 	"k8s.io/klog/v2"
+
 	"k8s.io/registry.k8s.io/cmd/archeio/app"
 )
 
@@ -35,6 +38,10 @@ func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
 	defer klog.Flush()
+	maxprocs.Set(maxprocs.Logger(
+		func(f string, a ...interface{}) {
+			klog.V(0).Infof(f, a...)
+		}))
 
 	// cloud run expects us to listen to HTTP on $PORT
 	// https://cloud.google.com/run/docs/container-contract#port
