@@ -104,8 +104,7 @@ type trieNode struct {
 	child0 *trieNode
 	child1 *trieNode
 	// both of these values will be set together or not set
-	// so we place them in a sub struct to save memory at the cost
-	// of chasing one additional pointer per trie node checked
+	// so we place them in a sub struct to save memory on intermediate nodes
 	value *nodeValue
 }
 
