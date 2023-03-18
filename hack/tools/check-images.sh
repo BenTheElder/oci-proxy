@@ -40,9 +40,20 @@ for image in ${images[@]}; do
     for reference in ${references[@]}; do
         new_reference="${reference/${old_registry}/${new_registry}}"
         # ensure image references have the same digests
+        # fetch with retries and backoff
         # TODO: for digest references we could just check that the image exists in the new registry
-        old_digest=$(crane digest "${reference}")
-        new_digest=$(crane digest "${new_reference}")
+        old_digest=""
+        for i in 1 2 3 4 5; do old_digest=$(crane digest "${reference}") && break || sleep $i; done
+        if [ -z "${old_digest}" ]; then
+            echo "FAIL: Failed to check ${old_digest}"
+            exit 1
+        fi
+        new_digest=""
+        for i in 1 2 3 4 5; do new_digest=$(crane digest "${new_reference}") && break || sleep $i; done
+        if [ -z "${new_digest}" ]; then
+            echo "FAIL: Failed to check ${old_digest}"
+            exit 1
+        fi
         if [[ "${new_digest}" != "${old_digest}" ]]; then
             echo "FAIL: Found Non Matching Image!"
             printf "Old: ${reference}\tdigest: ${old_digest}\n"
