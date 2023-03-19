@@ -20,102 +20,119 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
-	"time"
+	"strings"
 
-	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/google"
 )
 
 const dataFileName = "imagerefs.json"
 
-func main() {
-	hosts := []string{
-		// https://github.com/kubernetes/k8s.io/tree/main/registry.k8s.io/manifests#argcr-manifests
-		// k8s.gcr.io
-		"us.gcr.io/k8s-artifacts-prod",
-		"eu.gcr.io/k8s-artifacts-prod",
-		"asia.gcr.io/k8s-artifacts-prod",
-		// registry.k8s.io
-		"asia-east1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"asia-south1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"asia-northeast1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"asia-northeast2-docker.pkg.dev/k8s-artifacts-prod/images",
-		"australia-southeast1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"europe-north1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"europe-southwest1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"europe-west1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"europe-west2-docker.pkg.dev/k8s-artifacts-prod/images",
-		"europe-west4-docker.pkg.dev/k8s-artifacts-prod/images",
-		"europe-west8-docker.pkg.dev/k8s-artifacts-prod/images",
-		"europe-west9-docker.pkg.dev/k8s-artifacts-prod/images",
-		"southamerica-west1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"us-central1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"us-east1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"us-east4-docker.pkg.dev/k8s-artifacts-prod/images",
-		"us-east5-docker.pkg.dev/k8s-artifacts-prod/images",
-		"us-south1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"us-west1-docker.pkg.dev/k8s-artifacts-prod/images",
-		"us-west2-docker.pkg.dev/k8s-artifacts-prod/images",
-	}
+var hosts = []string{
+	// https://github.com/kubernetes/k8s.io/tree/main/registry.k8s.io/manifests#argcr-manifests
+	// k8s.gcr.io
+	"us.gcr.io/k8s-artifacts-prod",
+	"eu.gcr.io/k8s-artifacts-prod",
+	"asia.gcr.io/k8s-artifacts-prod",
+	// registry.k8s.io
+	"asia-east1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"asia-south1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"asia-northeast1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"asia-northeast2-docker.pkg.dev/k8s-artifacts-prod/images",
+	"australia-southeast1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"europe-north1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"europe-southwest1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"europe-west1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"europe-west2-docker.pkg.dev/k8s-artifacts-prod/images",
+	"europe-west4-docker.pkg.dev/k8s-artifacts-prod/images",
+	"europe-west8-docker.pkg.dev/k8s-artifacts-prod/images",
+	"europe-west9-docker.pkg.dev/k8s-artifacts-prod/images",
+	"southamerica-west1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"us-central1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"us-east1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"us-east4-docker.pkg.dev/k8s-artifacts-prod/images",
+	"us-east5-docker.pkg.dev/k8s-artifacts-prod/images",
+	"us-south1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"us-west1-docker.pkg.dev/k8s-artifacts-prod/images",
+	"us-west2-docker.pkg.dev/k8s-artifacts-prod/images",
+}
 
+func main() {
 	// get data
-	hostsToRefs, err := walkHosts(hosts)
+	//hostsToRefs, err := walkHosts(hosts)
+	// filterNonDanglingDigests(hostToRefs)
+	// writeData(hostsToRefs, "filtered-imagerefs.json")
+	//println("Done Fetching Data ....")
+	hostsToRefs, err := readData("filtered-imagerefs.json")
 	if err != nil {
 		panic(err)
 	}
-	println("Done Fetching Data ....")
 	if err := checkImages(hostsToRefs); err != nil {
 		panic(err)
 	}
 }
 
-func walkHosts(hosts []string) (HostsToRefs, error) {
-	// grab past run data from disk if we have it
-	hostsToRefs := tryReadData()
-	// roughly 5000 RPM, the limit on our registries
-	transport := NewRateLimitRoundTripper(83)
-	for _, host := range hosts {
-		// skip hosts we have from disk
-		if _, ok := hostsToRefs[host]; ok {
-			continue
+func checkImages(h HostsToRefs) error {
+	// TODO: figure out a reasonable way to output the full skew
+	// For now: manually altering this to inspect particular set
+	//a := "us.gcr.io/k8s-artifacts-prod"
+	//b := "eu.gcr.io/k8s-artifacts-prod"
+	a := "us-west1-docker.pkg.dev/k8s-artifacts-prod/images"
+	b := "us-west2-docker.pkg.dev/k8s-artifacts-prod/images"
+	println("missing images:")
+	for key := range h[a] {
+		if _, ok := h[b][key]; !ok {
+			println(b + "/" + key)
 		}
-		// identify all references => digests for all images in this repo
-		repo, err := name.NewRepository(host)
-		if err != nil {
-			return nil, err
-		}
-		if err := google.Walk(repo, func(r name.Repository, tags *google.Tags, err error) error {
-			if err != nil {
-				return err
-			}
-			// we only care about leaf entries where len(tags.Tags) > 0 and len(tags.Children) == 0
-			if len(tags.Tags) == 0 {
-				return nil
-			}
-			hostsToRefs.Add(host, tags)
-			return nil
-		}, google.WithTransport(transport)); err != nil {
-			return nil, err
-		}
-		// snapshot data to disk after each host, scanning these is *slow*
-		if err := writeData(hostsToRefs); err != nil {
-			return nil, err
-		}
-		fmt.Println("Finished host: "+host, time.Now())
 	}
-	return hostsToRefs, nil
+	for key := range h[b] {
+		if _, ok := h[a][key]; !ok {
+			println(a + "/" + key)
+		}
+	}
+	return nil
 }
 
-func checkImages(h HostsToRefs) error {
-	// TODO
+// deletes all refs that are digest refs that are reachable via a tag
+// leaving us only with tags, and digests that have no tag pointing to them
+// this is the unique subset of the data vs the more explicit and complete
+// dataset containing @digest => digest references
+func filterNonDanglingDigests(h HostsToRefs) {
 	for host := range h {
-		refs := len(h[host])
-		fmt.Println(refs, host)
+		for ref, digest := range h[host] {
+			if !isDigestRef(ref) {
+				digestRef := tagRefToDigestRef(ref, digest)
+				delete(h[host], digestRef)
+			}
+		}
 	}
+}
 
-	return nil
+// fixup data from before we trimmed refs in walk
+func trimPrefixes(h HostsToRefs) {
+	for host := range h {
+		trimmedHost := make(PartialRefToDigest)
+		for ref, digest := range h[host] {
+			trimmedHost[trimRefPrefix(ref)] = digest
+		}
+		h[host] = trimmedHost
+	}
+}
+
+func trimRefPrefix(ref string) string {
+	if strings.HasPrefix(ref, "k8s-artifacts-prod/images/") {
+		return strings.TrimPrefix(ref, "k8s-artifacts-prod/images/")
+	}
+	return strings.TrimPrefix(ref, "k8s-artifacts-prod/")
+}
+
+func isDigestRef(ref string) bool {
+	return strings.Contains(ref, "@sha256:")
+}
+
+func tagRefToDigestRef(ref, digest string) string {
+	idx := strings.Index(ref, ":")
+	return ref[:idx] + "@" + digest
 }
 
 type HostsToRefs map[string]PartialRefToDigest
@@ -130,7 +147,7 @@ func (h HostsToRefs) Add(host string, tags *google.Tags) {
 type PartialRefToDigest map[string]string
 
 func (r PartialRefToDigest) Add(tags *google.Tags) {
-	name := tags.Name
+	name := trimRefPrefix(tags.Name)
 	for digest, metadata := range tags.Manifests {
 		digest := digest
 		r[name+"@"+digest] = digest
@@ -140,8 +157,8 @@ func (r PartialRefToDigest) Add(tags *google.Tags) {
 	}
 }
 
-func writeData(data HostsToRefs) error {
-	file, err := os.OpenFile(dataFileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+func writeData(data HostsToRefs, filename string) error {
+	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -150,8 +167,8 @@ func writeData(data HostsToRefs) error {
 	return encoder.Encode(data)
 }
 
-func readData() (HostsToRefs, error) {
-	file, err := os.Open(dataFileName)
+func readData(filename string) (HostsToRefs, error) {
+	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +182,7 @@ func readData() (HostsToRefs, error) {
 }
 
 func tryReadData() HostsToRefs {
-	data, err := readData()
+	data, err := readData(dataFileName)
 	if err != nil {
 		return make(HostsToRefs)
 	}
