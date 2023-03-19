@@ -20,7 +20,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/v1/google"
@@ -74,11 +77,60 @@ func main() {
 
 func checkImages(h HostsToRefs) error {
 	// TODO: figure out a reasonable way to output the full skew
-	// For now: manually altering this to inspect particular set
-	//a := "us.gcr.io/k8s-artifacts-prod"
-	//b := "eu.gcr.io/k8s-artifacts-prod"
-	a := "us-west1-docker.pkg.dev/k8s-artifacts-prod/images"
-	b := "us-west2-docker.pkg.dev/k8s-artifacts-prod/images"
+	// find tags that are only in some regions
+	allPartialRefs := getAllPartialRefs(h)
+	println("")
+	missingSigStoreCount := map[string]int{}
+	missingImageTags := []string{}
+	for ref := range allPartialRefs {
+		// TODO: look for bad digest refs that are not sigstore
+		if isDigestRef(ref) {
+			continue
+		}
+		for host := range h {
+			if !hostHasRef(h, host, ref) {
+				// we expect this due to https://github.com/kubernetes/registry.k8s.io/issues/187
+				// but we want to know how many exactly
+				if isSigStoreTag(ref) {
+					missingSigStoreCount[host] += 1
+				} else {
+					// other tags missing in some regionswould be news
+					missingImageTags = append(missingImageTags, host+"/"+ref)
+				}
+			}
+		}
+	}
+	for host := range h {
+		fmt.Printf("%d missing sigstore tags in %s\n", missingSigStoreCount[host], host)
+	}
+	// sort ignoring hosts for easier inspecting
+	sortImagesIgnoreHost(missingImageTags)
+	for _, image := range missingImageTags {
+		println(image)
+	}
+	return nil
+}
+
+// we can cheat here, we know the first instance of k8s-artifacts-prod comes
+// after the host name
+func sortImagesIgnoreHost(images []string) {
+	sort.Slice(images, func(i, j int) bool {
+		is, js := trimHost(images[i]), trimHost(images[j])
+		return strings.Compare(is, js) < 0
+	})
+}
+
+func trimHost(image string) string {
+	const prefix = "k8s-artifacts-prod/"
+	i := strings.Index(image, prefix)
+	return image[i+len(prefix):]
+}
+
+// a := "us-west1-docker.pkg.dev/k8s-artifacts-prod/images"
+// b := "us-west2-docker.pkg.dev/k8s-artifacts-prod/images"
+// a := "us.gcr.io/k8s-artifacts-prod"
+// b := "eu.gcr.io/k8s-artifacts-prod"
+func diffRegions(h HostsToRefs, a, b string) {
 	println("missing images:")
 	for key := range h[a] {
 		if _, ok := h[b][key]; !ok {
@@ -90,7 +142,21 @@ func checkImages(h HostsToRefs) error {
 			println(a + "/" + key)
 		}
 	}
-	return nil
+}
+
+func hostHasRef(h HostsToRefs, host, ref string) bool {
+	_, has := h[host][ref]
+	return has
+}
+
+func getAllPartialRefs(h HostsToRefs) map[string]bool {
+	r := map[string]bool{}
+	for host := range h {
+		for ref := range h[host] {
+			r[ref] = true
+		}
+	}
+	return r
 }
 
 // deletes all refs that are digest refs that are reachable via a tag
@@ -124,6 +190,16 @@ func trimRefPrefix(ref string) string {
 		return strings.TrimPrefix(ref, "k8s-artifacts-prod/images/")
 	}
 	return strings.TrimPrefix(ref, "k8s-artifacts-prod/")
+}
+
+// techncially this only supports sha256 digest format but
+// we currently have no images that are not sha256 and this is a one-off
+// script to debug https://github.com/kubernetes/registry.k8s.io/issues/187
+// so not important
+var sigstoreTagRe = regexp.MustCompile(`^[^:]+:sha256-.*\.sig$`)
+
+func isSigStoreTag(ref string) bool {
+	return sigstoreTagRe.MatchString(ref)
 }
 
 func isDigestRef(ref string) bool {
