@@ -25,7 +25,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/v1/google"
 )
 
@@ -70,9 +72,67 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	if err := checkImages(hostsToRefs); err != nil {
+	if err := checkDigestOnly(hostsToRefs); err != nil {
 		panic(err)
 	}
+}
+
+// checking dangling image digests with no tags
+// assumes input is already filtered by filterNonDanglingDigests
+func checkDigestOnly(h HostsToRefs) error {
+	println("looking for non-sigstore dangling digest refs that are not in all regions:")
+	allPartialRefs := getAllPartialRefs(h)
+	for ref := range allPartialRefs {
+		if !isDigestRef(ref) {
+			continue
+		}
+		const typeSigstoreManifest = 1
+		const typeNonSigstoreManifest = 0
+		const unknownManifestType = -1
+		manifestType := unknownManifestType
+		missingHosts := map[string]bool{}
+		for host := range h {
+			fullRef := host + "/" + ref
+			haveRef := hostHasRef(h, host, ref)
+			missingHosts[fullRef] = !haveRef
+			if haveRef && manifestType == unknownManifestType {
+				b, err := getManifestWithRetries(fullRef)
+				if err != nil {
+					return err
+				}
+				if manifestIsProbablySigstore(b) {
+					manifestType = typeSigstoreManifest
+				} else {
+					manifestType = typeNonSigstoreManifest
+				}
+			}
+		}
+		if manifestType == typeNonSigstoreManifest {
+			for ref, missing := range missingHosts {
+				if missing {
+					println(ref)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func getManifestWithRetries(ref string) ([]byte, error) {
+	var err error
+	var b []byte
+	for i := 0; i < 5; i++ {
+		b, err = crane.Manifest(ref)
+		if err == nil {
+			return b, nil
+		}
+		time.Sleep(time.Second * time.Duration(i))
+	}
+	return nil, err
+}
+
+func manifestIsProbablySigstore(raw []byte) bool {
+	return strings.Contains(string(raw), "dev.cosignproject.cosign/signature")
 }
 
 func checkImages(h HostsToRefs) error {
