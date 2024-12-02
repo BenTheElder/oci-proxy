@@ -35,8 +35,10 @@ for version in ${versions[@]}; do
     done
 done
 for arch in ${!arch_digests[@]}; do
-    echo "$arch"
+    echo "Query for $arch:"
+    echo 'resource.type="http_load_balancer"'
     arch_digests[${arch}]=$(echo "${arch_digests[${arch}]}"')' | perl -pe 's/\( OR /\(/')
     echo "${arch_digests[${arch}]}"
+    echo ""
 done
 
