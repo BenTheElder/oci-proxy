@@ -20,7 +20,7 @@ set -o errexit -o nounset -o pipefail
 host='registry.k8s.io'
 image='kube-proxy'
 
-versions=( 'v1.30.'{0..7} )
+versions=( 'v1.31.'{0..3} 'v1.30.'{0..7} 'v1.29.'{0..11} )
 declare -A arch_digests
 for arch in '"s390x"' '"ppc64le"' '"amd64"' '"arm64"'; do
     arch_digests[${arch}]="("
